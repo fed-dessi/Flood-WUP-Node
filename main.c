@@ -55,8 +55,8 @@
 // -----------------------------------------------------------------------------
 //                              Macros and Typedefs
 // -----------------------------------------------------------------------------
-#define QUEUE_DEFAULT_LENGTH 4
-#define RETRANSMISSION_BUFFER_DEFAULT_LENGTH 4
+#define QUEUE_DEFAULT_LENGTH 16
+#define RETRANSMISSION_BUFFER_DEFAULT_LENGTH 10
 #define RECEIVE_WINDOW_MICROSECONDS 1000000
 #define RECEIVE_WINDOW_MILLISECONDS RECEIVE_WINDOW_MICROSECONDS/1000
 
@@ -141,7 +141,7 @@ static uint16_t rxFifoSize = sizeof(pkt_t) * QUEUE_DEFAULT_LENGTH;
 static uint8_t railTxFifo[sizeof(pkt_t) * QUEUE_DEFAULT_LENGTH];
 
 ///Retransmission buffer queue
-static pkt_t retransmissionBuffer[sizeof(pkt_t) * RETRANSMISSION_BUFFER_DEFAULT_LENGTH];
+static pkt_t retransmissionBuffer[RETRANSMISSION_BUFFER_DEFAULT_LENGTH];
 static uint32_t retransmissionBufferIndex = 0;
 
 /// Dummy struct to use to generate received and transmitted packets
