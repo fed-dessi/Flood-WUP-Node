@@ -316,11 +316,14 @@ void transmitterTaskFunction (void *tt)
       //CREATE A QUEUE TO RECEIVE PACKETS TO SEND
       xQueueReceive(transmitterQueueHandle, &retransmissionPacket, portMAX_DELAY);
 
+      //Wait a random time to retransmit the packet
+      sl_sleeptimer_delay_millisecond (rand() % 200 + 1);
+
       //Simulate sending a WUP packet to wake up nodes on the sub GHZ frequency.
       //In our case we send the actual packet
       RAIL_WriteTxFifo (rail_handle, (uint8_t*) &retransmissionPacket, sizeof(pkt_t), false);
       RAIL_StartTx (rail_handle, 21, 0, NULL);
-      //Wait for 100ms to be sure that the node have woken up
+      //Wait for 100ms to be sure that the nodes have woken up
       //We are still in the rx wake up window (1sec)
       sl_sleeptimer_delay_millisecond (100);
       //Send the actual flood data packet
