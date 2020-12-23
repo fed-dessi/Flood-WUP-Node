@@ -51,7 +51,7 @@
 //                              Macros and Typedefs
 // -----------------------------------------------------------------------------
 #define QUEUE_DEFAULT_LENGTH 16
-
+#define SLEEPTIMER_DELAY_MS 1000
 enum wupSequence{
   Wa,
   Wb,
@@ -86,11 +86,22 @@ static StackType_t delayerTaskStack[configMINIMAL_STACK_SIZE];
 static void delayerTaskFunction (void*);
 static TaskHandle_t delayerTaskHandle;
 
+/// Transmitter Task
+static StaticTask_t transmitterTaskTCB;
+static StackType_t transmitterTaskStack[configMINIMAL_STACK_SIZE];
+static void transmitterTaskFunction (void*);
+static TaskHandle_t transmitterTaskHandle;
+
 ///Idle task and Timer task definitions
 static StaticTask_t xTimerTaskTCB;
 static StackType_t uxTimerTaskStack[configTIMER_TASK_STACK_DEPTH];
 static StaticTask_t xIdleTaskTCB;
 static StackType_t uxIdleTaskStack[configMINIMAL_STACK_SIZE];
+
+/// Queue handle and space
+static QueueHandle_t transmitterQueueHandle;
+static StaticQueue_t transmitterQueueDataStruct;
+static uint8_t transmitterQueue[sizeof(pkt_t) * QUEUE_DEFAULT_LENGTH];
 
 ///RFSense callback
 static void rfSenseCb(void);
@@ -110,9 +121,10 @@ static RAIL_Handle_t rail_handle;
 /// RAIL tx and rx queue
 static uint8_t railRxFifo[sizeof(pkt_t) * QUEUE_DEFAULT_LENGTH];
 static uint16_t rxFifoSize = sizeof(pkt_t) * QUEUE_DEFAULT_LENGTH;
+static uint8_t railTxFifo[sizeof(pkt_t) * QUEUE_DEFAULT_LENGTH];
 
 /// Dummy struct to use to generate received and transmitted packets
-static pkt_t rxPacket;
+static pkt_t rxPacket, txPacket;
 
 ///Rx Packet handle, details and info
 static RAIL_RxPacketHandle_t packet_handle;
@@ -154,11 +166,18 @@ int main(void)
   rail_handle = app_init();
 
   //Receiver Task
-  receiverTaskHandle = xTaskCreateStatic (receiverTaskFunction, "receiverTask", configMINIMAL_STACK_SIZE, NULL, 2, receiverTaskStack, &receiverTaskTCB);
+  receiverTaskHandle = xTaskCreateStatic (receiverTaskFunction, "receiverTask", configMINIMAL_STACK_SIZE, NULL, 3, receiverTaskStack, &receiverTaskTCB);
   if (receiverTaskHandle == NULL)
    {
      return(0);
    }
+
+  //Transmitter Task initialization
+  transmitterTaskHandle = xTaskCreateStatic (transmitterTaskFunction, "transmitterTask", configMINIMAL_STACK_SIZE, NULL, 2, transmitterTaskStack, &transmitterTaskTCB);
+  if (transmitterTaskHandle == NULL)
+    {
+      return 0;
+    }
 
   //Delayer Task
   //This task prevents going into sleep mode again after waking up. "Sleep mode" is just the Idle Task running,
@@ -168,6 +187,9 @@ int main(void)
    {
      return(0);
    }
+
+  //Init Queues
+  transmitterQueueHandle = xQueueCreateStatic(QUEUE_DEFAULT_LENGTH, sizeof(pkt_t), transmitterQueue, &transmitterQueueDataStruct);
 
   //Create the semaphores
   receiverSemaphoreHandle = xSemaphoreCreateCounting(10, 0);
@@ -180,6 +202,9 @@ int main(void)
       return 0;
   }
 
+
+  // setting tx fifo
+  RAIL_SetTxFifo (rail_handle, railTxFifo, 0, sizeof(pkt_t) * QUEUE_DEFAULT_LENGTH);
 
   //enabling vcom
   GPIO_PinOutSet (SL_BOARD_ENABLE_VCOM_PORT, SL_BOARD_ENABLE_VCOM_PIN);
@@ -239,13 +264,20 @@ void receiverTaskFunction (void *rt){
       if (packet_handle != RAIL_RX_PACKET_HANDLE_INVALID){
           sl_sleeptimer_is_timer_running(&delayerSleeptimerHandle, &isTimerRunning);
           if(isTimerRunning){
-              sl_sleeptimer_restart_timer_ms(&delayerSleeptimerHandle, 5000, timerCallback, (void*)&wait, 0, 0);
+              sl_sleeptimer_restart_timer_ms(&delayerSleeptimerHandle, SLEEPTIMER_DELAY_MS, timerCallback, (void*)&wait, 0, 0);
           }
 
           RAIL_CopyRxPacket (&rxPacket, &packet_info);
           RAIL_ReleaseRxPacket (rail_handle, packet_handle);
+          if(rxPacket.header.pktSeq > lastRxPktSequenceNumber + 1){
 
-          if(rxPacket.header.wupSeq == wupSeq && rxPacket.header.pktSeq == lastRxPktSequenceNumber + 1){
+              txPacket.header.wupSeq = Wr;
+              txPacket.header.pktSeq = lastRxPktSequenceNumber + 1;
+              snprintf(txPacket.payload, 11, "%lu", lastRxPktSequenceNumber + 1);
+              xQueueSend(transmitterQueueHandle, (void *)&txPacket, 0);
+
+          }else if(rxPacket.header.wupSeq == wupSeq && rxPacket.header.pktSeq == lastRxPktSequenceNumber + 1){
+
             snprintf (buffer, 100, "Received a flood packet:\r\nPacket Sequence number: %lu\r\nWUP sequence: %lu\r\n", rxPacket.header.pktSeq, rxPacket.header.wupSeq);
 
             while (ECODE_OK != UARTDRV_TransmitB (sl_uartdrv_usart_vcom_handle, &buffer[0], strlen(buffer)));
@@ -262,6 +294,34 @@ void receiverTaskFunction (void *rt){
     }
 }
 
+void transmitterTaskFunction(void *tt){
+  while(1){
+      xQueueReceive(transmitterQueueHandle, &(txPacket), portMAX_DELAY);
+
+      //Check that we don't overflow the tx buffer
+      while(RAIL_GetTxFifoSpaceAvailable(rail_handle) < sizeof(pkt_t) * 2){
+          sl_sleeptimer_delay_millisecond (100);
+      }
+      //Simulate sending a WUP packet to wake up nodes on the sub GHZ frequency.
+      //In our case we send the actual packet
+      RAIL_WriteTxFifo (rail_handle, (uint8_t*) &txPacket, sizeof(pkt_t), false);
+      while (RAIL_StartTx (rail_handle, 21, 0, NULL) != RAIL_STATUS_NO_ERROR);
+      //Wait for 100ms to be sure that the node have woken up
+      //We are still in the rx wake up window (1sec)
+      sl_sleeptimer_delay_millisecond (100);
+      //Send the actual flood data packet
+      RAIL_WriteTxFifo (rail_handle, (uint8_t*) &txPacket, sizeof(pkt_t), false);
+      while (RAIL_STATUS_NO_ERROR != RAIL_StartTx (rail_handle, 0, 0, NULL));
+
+
+      //SERIAL OUTPUT FOR DEBUGGING PURPOSES
+      snprintf (&buffer, 100, "Retransmission Packet request sent:\r\nSequence number: %lu\r\n", txPacket.header.pktSeq);
+
+      while (ECODE_OK != UARTDRV_TransmitB (sl_uartdrv_usart_vcom_handle, &buffer[0], strlen (buffer)));
+  }
+}
+
+
 
 ///Delayer task, avoids we immediately go to sleep after waking up with RFSense
 void delayerTaskFunction (void *dt)
@@ -272,7 +332,7 @@ void delayerTaskFunction (void *dt)
       sl_sleeptimer_is_timer_running(&delayerSleeptimerHandle, &isTimerRunning);
       if(!isTimerRunning){
           wait = true;
-          sl_sleeptimer_start_timer_ms(&delayerSleeptimerHandle, 5000, timerCallback, (void*)&wait, 0, 0);
+          sl_sleeptimer_start_timer_ms(&delayerSleeptimerHandle, SLEEPTIMER_DELAY_MS, timerCallback, (void*)&wait, 0, 0);
           while(wait);
       }
       //TODO: remove after finishing the debugging phase
