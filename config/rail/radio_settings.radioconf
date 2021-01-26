@@ -518,7 +518,7 @@
               <value>int:1000000</value>
             </override>
           </profile_input_overrides>
-          <metadata>{&quot;customChannel&quot;:false,&quot;errors&quot;:{},&quot;warnings&quot;:{},&quot;disabledGizmos&quot;:{}}</metadata>
+          <metadata>{&quot;customChannel&quot;:true,&quot;errors&quot;:{},&quot;warnings&quot;:{},&quot;disabledGizmos&quot;:{&quot;frame_type_2_valid&quot;:{&quot;frame_type_bits&quot;:true},&quot;frame_type_2_filter&quot;:{&quot;frame_type_bits&quot;:true},&quot;frame_type_2_length&quot;:{&quot;frame_type_bits&quot;:true},&quot;frame_type_3_valid&quot;:{&quot;frame_type_bits&quot;:true},&quot;frame_type_3_filter&quot;:{&quot;frame_type_bits&quot;:true},&quot;frame_type_3_length&quot;:{&quot;frame_type_bits&quot;:true},&quot;frame_type_4_valid&quot;:{&quot;frame_type_bits&quot;:true},&quot;frame_type_4_filter&quot;:{&quot;frame_type_bits&quot;:true},&quot;frame_type_4_length&quot;:{&quot;frame_type_bits&quot;:true},&quot;frame_type_5_valid&quot;:{&quot;frame_type_bits&quot;:true},&quot;frame_type_5_filter&quot;:{&quot;frame_type_bits&quot;:true},&quot;frame_type_5_length&quot;:{&quot;frame_type_bits&quot;:true},&quot;frame_type_6_valid&quot;:{&quot;frame_type_bits&quot;:true},&quot;frame_type_6_filter&quot;:{&quot;frame_type_bits&quot;:true},&quot;frame_type_6_length&quot;:{&quot;frame_type_bits&quot;:true},&quot;frame_type_7_valid&quot;:{&quot;frame_type_bits&quot;:true},&quot;frame_type_7_filter&quot;:{&quot;frame_type_bits&quot;:true},&quot;frame_type_7_length&quot;:{&quot;frame_type_bits&quot;:true}}}</metadata>
         </channel_config_entry>
         <channel_config_entry name="Channel Group 2">
           <base_frequency>868000000</base_frequency>

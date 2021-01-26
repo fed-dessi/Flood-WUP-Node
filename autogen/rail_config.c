@@ -2,7 +2,7 @@
  * @brief RAIL Configuration
  * @details
  *   WARNING: Auto-Generated Radio Config  -  DO NOT EDIT
- *   Radio Configurator Version: 5.8.2
+ *   Radio Configurator Version: 5.10.1
  *   RAIL Adapter Version: 2.4.13
  *   RAIL Compatibility: 2.x
  *******************************************************************************
@@ -70,7 +70,7 @@ static RAIL_ChannelConfigEntryAttr_t channelConfigEntryAttr_1 = {
 };
 
 static const uint32_t phyInfo_0[] = {
-  7UL,
+  8UL,
   0x00C30C30UL, // 195.04761904761907
   (uint32_t) NULL,
   (uint32_t) irCalConfig_0,
@@ -87,10 +87,11 @@ static const uint32_t phyInfo_0[] = {
   0x02004C44UL,
   (uint32_t) NULL,
   (uint32_t) NULL,
+  (uint32_t) NULL,
 };
 
 static const uint32_t phyInfo_1[] = {
-  7UL,
+  8UL,
   0x00618618UL, // 97.52380952380952
   (uint32_t) NULL,
   (uint32_t) irCalConfig_1,
@@ -105,6 +106,7 @@ static const uint32_t phyInfo_1[] = {
   500000UL,
   (1UL << 8) | 1UL,
   0x0600E4CCUL,
+  (uint32_t) NULL,
   (uint32_t) NULL,
   (uint32_t) NULL,
 };
