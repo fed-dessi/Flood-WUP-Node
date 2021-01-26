@@ -30,13 +30,11 @@
 #else // SL_CATALOG_KERNEL_PRESENT
   #include "sl_system_process_action.h"
 #endif // SL_CATALOG_KERNEL_PRESENT
-
-#include <FreeRTOS.h>
-#include <task.h>
-#include <semphr.h>
-#include <queue.h>
-#include <sl_sleeptimer.h>
-#include <sl_udelay.h>
+#include "FreeRTOS.h"
+#include "task.h"
+#include "queue.h"
+#include "sl_sleeptimer.h"
+#include "sl_udelay.h"
 
 #include "string.h"
 #include "strings.h"
@@ -44,8 +42,8 @@
 
 #include "sl_uartdrv_usart_vcom_config.h"
 #include "sl_uartdrv_instances.h"
-#include <sl_board_control_config.h>
-#include <sl_power_manager_config.h>
+#include "sl_board_control_config.h"
+#include "sl_power_manager_config.h"
 
 // -----------------------------------------------------------------------------
 //                              Macros and Typedefs
@@ -78,26 +76,20 @@ typedef struct
 ///Receiver Task
 static StaticTask_t receiverTaskTCB;
 static StackType_t receiverTaskStack[configMINIMAL_STACK_SIZE];
-static void receiverTaskFunction (void*);
+static void receiverTaskFunction ();
 static TaskHandle_t receiverTaskHandle;
 
 ///Delayer Task
 static StaticTask_t delayerTaskTCB;
 static StackType_t delayerTaskStack[configMINIMAL_STACK_SIZE];
-static void delayerTaskFunction (void*);
+static void delayerTaskFunction ();
 static TaskHandle_t delayerTaskHandle;
 
 /// Transmitter Task
 static StaticTask_t transmitterTaskTCB;
 static StackType_t transmitterTaskStack[configMINIMAL_STACK_SIZE];
-static void transmitterTaskFunction (void*);
+static void transmitterTaskFunction ();
 static TaskHandle_t transmitterTaskHandle;
-
-///Idle task and Timer task definitions
-static StaticTask_t xTimerTaskTCB;
-static StackType_t uxTimerTaskStack[configTIMER_TASK_STACK_DEPTH];
-static StaticTask_t xIdleTaskTCB;
-static StackType_t uxIdleTaskStack[configMINIMAL_STACK_SIZE];
 
 /// Queue handle and space
 static QueueHandle_t transmitterQueueHandle;
@@ -141,9 +133,6 @@ static uint16_t wupSeq = Wa;
 ///VCOM Serial print buffer
 static uint8_t buffer[100];
 
-///Semaphores handles
-SemaphoreHandle_t receiverSemaphoreHandle;
-SemaphoreHandle_t delayerSemaphoreHandle;
 
 ///Retransmission buffer and index
 static pkt_t retransmissionBuffer[QUEUE_DEFAULT_LENGTH];
@@ -173,48 +162,37 @@ int main(void)
   rail_handle = app_init();
 
   //Receiver Task
-  receiverTaskHandle = xTaskCreateStatic (receiverTaskFunction, "receiverTask", configMINIMAL_STACK_SIZE, NULL, 2, receiverTaskStack, &receiverTaskTCB);
-  if (receiverTaskHandle == NULL)
-   {
-     return(0);
-   }
+    receiverTaskHandle = xTaskCreateStatic (receiverTaskFunction, "receiverTask", configMINIMAL_STACK_SIZE, NULL, 3, receiverTaskStack, &receiverTaskTCB);
+    if (receiverTaskHandle == NULL)
+     {
+       return(0);
+     }
 
-  //Transmitter Task initialization
-  transmitterTaskHandle = xTaskCreateStatic (transmitterTaskFunction, "transmitterTask", configMINIMAL_STACK_SIZE, NULL, 3, transmitterTaskStack, &transmitterTaskTCB);
-  if (transmitterTaskHandle == NULL)
-    {
-      return 0;
-    }
+    //Transmitter Task initialization
+    transmitterTaskHandle = xTaskCreateStatic (transmitterTaskFunction, "transmitterTask", configMINIMAL_STACK_SIZE, NULL, 2, transmitterTaskStack, &transmitterTaskTCB);
+    if (transmitterTaskHandle == NULL)
+      {
+        return 0;
+      }
 
-  //Delayer Task
-  //This task prevents going into sleep mode again after waking up. "Sleep mode" is just the Idle Task running,
-  //when we wake up with RFSense we would immediately fall back into it after the callback.
-  delayerTaskHandle = xTaskCreateStatic (delayerTaskFunction, "delayerTask", configMINIMAL_STACK_SIZE, NULL, 1, delayerTaskStack, &delayerTaskTCB);
-  if (delayerTaskHandle == NULL)
-   {
-     return(0);
-   }
+    //Delayer Task
+    //This task prevents going into sleep mode again after waking up. "Sleep mode" is just the Idle Task running,
+    //when we wake up with RFSense we would immediately fall back into it after the callback.
+    delayerTaskHandle = xTaskCreateStatic (delayerTaskFunction, "delayerTask", configMINIMAL_STACK_SIZE, NULL, 1, delayerTaskStack, &delayerTaskTCB);
+    if (delayerTaskHandle == NULL)
+     {
+       return(0);
+     }
 
-  //Init Queues
-  transmitterQueueHandle = xQueueCreateStatic(QUEUE_DEFAULT_LENGTH, sizeof(pkt_t), transmitterQueue, &transmitterQueueDataStruct);
+    //Init Queues
+    transmitterQueueHandle = xQueueCreateStatic(QUEUE_DEFAULT_LENGTH, sizeof(pkt_t), transmitterQueue, &transmitterQueueDataStruct);
 
-  //Create the semaphores
-  receiverSemaphoreHandle = xSemaphoreCreateCounting(10, 0);
-  if( receiverSemaphoreHandle == NULL ){
-      return 0;
-  }
+    // setting tx fifo
+    RAIL_SetTxFifo (rail_handle, railTxFifo, 0, sizeof(pkt_t) * QUEUE_DEFAULT_LENGTH);
 
-  delayerSemaphoreHandle = xSemaphoreCreateCounting(10, 0);
-  if( delayerSemaphoreHandle == NULL ){
-      return 0;
-  }
+    //enabling vcom
+    GPIO_PinOutSet (SL_BOARD_ENABLE_VCOM_PORT, SL_BOARD_ENABLE_VCOM_PIN);
 
-
-  // setting tx fifo
-  RAIL_SetTxFifo (rail_handle, railTxFifo, 0, sizeof(pkt_t) * QUEUE_DEFAULT_LENGTH);
-
-  //enabling vcom
-  GPIO_PinOutSet (SL_BOARD_ENABLE_VCOM_PORT, SL_BOARD_ENABLE_VCOM_PIN);
 
 #if defined(SL_CATALOG_KERNEL_PRESENT)
   // Start the kernel. Task(s) created in app_init() will start running.
@@ -239,33 +217,12 @@ int main(void)
 // -----------------------------------------------------------------------------
 //                          Static Function Definitions
 // -----------------------------------------------------------------------------
-///Idle and Timer Task definition
-void vApplicationGetIdleTaskMemory (StaticTask_t **ppxIdleTaskTCBBuffer,
-                               StackType_t **ppxIdleTaskStackBuffer,
-                               uint32_t *pulIdleTaskStackSize)
-{
-  //Declare static variables so they're not placed on the stack
-
-  *ppxIdleTaskTCBBuffer = &xIdleTaskTCB;
-  *ppxIdleTaskStackBuffer = uxIdleTaskStack;
-  *pulIdleTaskStackSize = configMINIMAL_STACK_SIZE;
-}
-
-void vApplicationGetTimerTaskMemory (StaticTask_t **ppxTimerTaskTCBBuffer,
-                                StackType_t **ppxTimerTaskStackBuffer,
-                                uint32_t *pulTimerTaskStackSize)
-{
-
-  *ppxTimerTaskTCBBuffer = &xTimerTaskTCB;
-  *ppxTimerTaskStackBuffer = uxTimerTaskStack;
-  *pulTimerTaskStackSize = configTIMER_TASK_STACK_DEPTH;
-}
 
 ///Receiver Task
-void receiverTaskFunction (void *rt){
+void receiverTaskFunction (){
   while (1)
     {
-      xSemaphoreTake(receiverSemaphoreHandle, portMAX_DELAY);
+      ulTaskNotifyTake(pdFALSE, portMAX_DELAY);
       packet_handle = RAIL_GetRxPacketInfo (rail_handle, RAIL_RX_PACKET_HANDLE_OLDEST_COMPLETE, &packet_info);
 
       if (packet_handle != RAIL_RX_PACKET_HANDLE_INVALID){
@@ -278,10 +235,6 @@ void receiverTaskFunction (void *rt){
           RAIL_ReleaseRxPacket (rail_handle, packet_handle);
           sl_sleeptimer_is_timer_running(&retransmissionSleeptimerHandle, &isRetransmissionTimerRunning);
           if(rxPacket.header.wupSeq == Wr){
-              //TODO:Wait a random time to transmit, if we receive the same packet from another node do not forward it
-              //Check with running timer and pkt_t structure
-
-
               //Search for the packet if we have it and transmit it
               for(unsigned int i = 0; i < retransmissionBufferIndex; i++){
                   if(retransmissionBuffer[i].header.pktSeq == rxPacket.header.pktSeq){
@@ -327,14 +280,14 @@ void receiverTaskFunction (void *rt){
               }
 
               //Random delay time to retransmit to avoid collision
-              sl_sleeptimer_delay_millisecond(rand() % 200);
+              sl_sleeptimer_delay_millisecond(rand() % 100);
               xQueueSend(transmitterQueueHandle, (void *)&rxPacket, 0);
           }
       }
     }
 }
 
-void transmitterTaskFunction(void *tt){
+void transmitterTaskFunction(){
   while(1){
       xQueueReceive(transmitterQueueHandle, &(txPacket), portMAX_DELAY);
 
@@ -342,7 +295,6 @@ void transmitterTaskFunction(void *tt){
       while(RAIL_GetTxFifoSpaceAvailable(rail_handle) < sizeof(pkt_t) * 2){
           sl_sleeptimer_delay_millisecond (100);
       }
-      //TODO: Implement RAIL's CSMA/CA (RAIL_StartCcaCsmaTx, look at the documentation)
       //Simulate sending a WUP packet to wake up nodes on the sub GHZ frequency.
       //In our case we send the actual packet
       RAIL_WriteTxFifo (rail_handle, (uint8_t*) &txPacket, sizeof(pkt_t), false);
@@ -368,11 +320,11 @@ void transmitterTaskFunction(void *tt){
 
 
 ///Delayer task, avoids we immediately go to sleep after waking up with RFSense
-void delayerTaskFunction (void *dt)
+void delayerTaskFunction ()
 {
   while (1)
     {
-      xSemaphoreTake(delayerSemaphoreHandle, portMAX_DELAY);
+      ulTaskNotifyTake(pdFALSE, portMAX_DELAY);
       sl_sleeptimer_is_timer_running(&delayerSleeptimerHandle, &isTimerRunning);
       if(!isTimerRunning){
           wait = true;
@@ -409,7 +361,7 @@ void rfSenseCb ()
   if (RAIL_StartRx (rail_handle, 0 , NULL) == RAIL_STATUS_NO_ERROR)
     {
       xHigherPriorityTaskWoken = pdFALSE;
-      xSemaphoreGiveFromISR (delayerSemaphoreHandle, &xHigherPriorityTaskWoken);
+      vTaskNotifyGiveFromISR(delayerTaskHandle, &xHigherPriorityTaskWoken);
       portYIELD_FROM_ISR(xHigherPriorityTaskWoken);
     }
 }
@@ -428,7 +380,7 @@ sl_rail_app_on_event (RAIL_Handle_t rail_handle, RAIL_Events_t events)
       //new rx -> deferred handler architecture
       RAIL_HoldRxPacket (rail_handle);
       xHigherPriorityTaskWoken = pdFALSE;
-      xSemaphoreGiveFromISR(receiverSemaphoreHandle, &xHigherPriorityTaskWoken);
+      vTaskNotifyGiveFromISR(receiverTaskHandle, &xHigherPriorityTaskWoken);
       portYIELD_FROM_ISR(xHigherPriorityTaskWoken);
 
     }

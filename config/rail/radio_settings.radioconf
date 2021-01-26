@@ -504,8 +504,6 @@
       <metadata>{&quot;errors&quot;:{},&quot;warnings&quot;:{},&quot;disabledGizmos&quot;:{&quot;frame_type_2_valid&quot;:{&quot;frame_type_bits&quot;:true},&quot;frame_type_2_filter&quot;:{&quot;frame_type_bits&quot;:true},&quot;frame_type_2_length&quot;:{&quot;frame_type_bits&quot;:true},&quot;frame_type_3_valid&quot;:{&quot;frame_type_bits&quot;:true},&quot;frame_type_3_filter&quot;:{&quot;frame_type_bits&quot;:true},&quot;frame_type_3_length&quot;:{&quot;frame_type_bits&quot;:true},&quot;frame_type_4_valid&quot;:{&quot;frame_type_bits&quot;:true},&quot;frame_type_4_filter&quot;:{&quot;frame_type_bits&quot;:true},&quot;frame_type_4_length&quot;:{&quot;frame_type_bits&quot;:true},&quot;frame_type_5_valid&quot;:{&quot;frame_type_bits&quot;:true},&quot;frame_type_5_filter&quot;:{&quot;frame_type_bits&quot;:true},&quot;frame_type_5_length&quot;:{&quot;frame_type_bits&quot;:true},&quot;frame_type_6_valid&quot;:{&quot;frame_type_bits&quot;:true},&quot;frame_type_6_filter&quot;:{&quot;frame_type_bits&quot;:true},&quot;frame_type_6_length&quot;:{&quot;frame_type_bits&quot;:true},&quot;frame_type_7_valid&quot;:{&quot;frame_type_bits&quot;:true},&quot;frame_type_7_filter&quot;:{&quot;frame_type_bits&quot;:true},&quot;frame_type_7_length&quot;:{&quot;frame_type_bits&quot;:true}}}</metadata>
       <channel_config_entries>
         <channel_config_entry name="Channel Group 1">
-          <base_frequency>2400000000</base_frequency>
-          <channel_spacing>1000000</channel_spacing>
           <physical_channel_offset>SAME_AS_FIRST_CHANNEL</physical_channel_offset>
           <channel_number_start>0</channel_number_start>
           <channel_number_end>20</channel_number_end>
