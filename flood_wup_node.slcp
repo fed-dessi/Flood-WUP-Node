@@ -88,6 +88,7 @@ component:
 - {id: device_init}
 - {id: freertos_heap_4}
 - {id: sl_flex_restrictions}
+- {id: ls013b7dh03}
 - {id: rail_util_recommended}
 category: RAIL Examples
 toolchain_settings:

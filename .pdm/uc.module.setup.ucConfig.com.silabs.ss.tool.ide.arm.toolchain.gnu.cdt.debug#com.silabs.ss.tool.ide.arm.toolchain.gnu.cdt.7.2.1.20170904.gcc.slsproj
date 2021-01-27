@@ -9,7 +9,7 @@
     <file name="sl_mx25_flash_shutdown_usart_config.h" uri="studio:/project/config/sl_mx25_flash_shutdown_usart_config.h"/>
     <file name="sl_device_init_dcdc_config.h" uri="studio:/project/config/sl_device_init_dcdc_config.h"/>
     <file name="sl_device_init_lfxo_config.h" uri="studio:/project/config/sl_device_init_lfxo_config.h"/>
-    <file name="FreeRTOSConfig.h" generated="true" uri="studio:/project/config/FreeRTOSConfig.h"/>
+    <file name="FreeRTOSConfig.h" uri="studio:/project/config/FreeRTOSConfig.h"/>
     <file name="dmadrv_config.h" uri="studio:/project/config/dmadrv_config.h"/>
     <file name="sl_rail_util_pti_config.h" uri="studio:/project/config/sl_rail_util_pti_config.h"/>
     <file name="uartdrv_config.h" uri="studio:/project/config/uartdrv_config.h"/>

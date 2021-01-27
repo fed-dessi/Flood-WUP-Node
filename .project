@@ -536,6 +536,11 @@
 			<locationURI>STUDIO_SDK_LOC/app/flex/component/common/sl_flex_assert/sl_flex_assert.h</locationURI>
 		</link>
 		<link>
+			<name>gecko_sdk_3.1.0/hardware/driver/memlcd/src/ls013b7dh03/sl_memlcd_display.h</name>
+			<type>1</type>
+			<locationURI>STUDIO_SDK_LOC/hardware/driver/memlcd/src/ls013b7dh03/sl_memlcd_display.h</locationURI>
+		</link>
+		<link>
 			<name>gecko_sdk_3.1.0/hardware/driver/mx25_flash_shutdown/inc/sl_mx25_flash_shutdown_usart/sl_mx25_flash_shutdown.h</name>
 			<type>1</type>
 			<locationURI>STUDIO_SDK_LOC/hardware/driver/mx25_flash_shutdown/inc/sl_mx25_flash_shutdown_usart/sl_mx25_flash_shutdown.h</locationURI>

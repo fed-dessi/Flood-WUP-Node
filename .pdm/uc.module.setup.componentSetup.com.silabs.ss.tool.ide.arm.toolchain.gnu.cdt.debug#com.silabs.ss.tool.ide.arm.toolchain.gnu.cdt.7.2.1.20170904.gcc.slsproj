@@ -321,6 +321,13 @@
             </folder>
           </folder>
         </folder>
+        <folder name="memlcd">
+          <folder name="src">
+            <folder name="ls013b7dh03">
+              <file name="sl_memlcd_display.h" uri="file:///C:/SiliconLabs/SimplicityStudio/v5_2/developer/sdks/gecko_sdk_suite/v3.1/hardware/driver/memlcd/src/ls013b7dh03/sl_memlcd_display.h"/>
+            </folder>
+          </folder>
+        </folder>
       </folder>
       <folder name="board">
         <folder name="src">
@@ -446,6 +453,7 @@
   <includePath uri="studio:/sdk/platform/radio/rail_lib/plugin/pa-conversions/efr32xg1x"/>
   <includePath uri="studio:/sdk/platform/radio/rail_lib/plugin/rail_util_protocol"/>
   <includePath uri="studio:/sdk/platform/CMSIS/Include"/>
+  <includePath uri="studio:/sdk/hardware/driver/memlcd/src/ls013b7dh03"/>
   <includePath uri="studio:/sdk/platform/service/sleeptimer/inc"/>
   <includePath uri="studio:/sdk/platform/radio/rail_lib/plugin/rail_util_callbacks"/>
   <macroDefinition name="EFR32MG12P433F1024GM68"/>
