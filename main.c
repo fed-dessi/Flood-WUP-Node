@@ -44,6 +44,8 @@
 #include "sl_uartdrv_instances.h"
 #include "sl_board_control_config.h"
 #include "sl_power_manager_config.h"
+#include "sl_led.h"
+#include "sl_simple_led_instances.h"
 
 // -----------------------------------------------------------------------------
 //                              Macros and Typedefs
@@ -140,9 +142,8 @@ static uint32_t retransmissionBufferIndex = 0;
 static volatile bool found;
 
 static sl_sleeptimer_timer_handle_t delayerSleeptimerHandle;
-static sl_sleeptimer_timer_handle_t retransmissionSleeptimerHandle;
 static volatile bool wait;
-static bool isTimerRunning, isRetransmissionTimerRunning;
+static bool isTimerRunning;
 
 // -----------------------------------------------------------------------------
 //                          Public Function Definitions
@@ -162,14 +163,14 @@ int main(void)
   rail_handle = app_init();
 
   //Receiver Task
-    receiverTaskHandle = xTaskCreateStatic (receiverTaskFunction, "receiverTask", configMINIMAL_STACK_SIZE, NULL, 3, receiverTaskStack, &receiverTaskTCB);
+    receiverTaskHandle = xTaskCreateStatic (receiverTaskFunction, "receiverTask", configMINIMAL_STACK_SIZE, NULL, 2, receiverTaskStack, &receiverTaskTCB);
     if (receiverTaskHandle == NULL)
      {
        return(0);
      }
 
     //Transmitter Task initialization
-    transmitterTaskHandle = xTaskCreateStatic (transmitterTaskFunction, "transmitterTask", configMINIMAL_STACK_SIZE, NULL, 2, transmitterTaskStack, &transmitterTaskTCB);
+    transmitterTaskHandle = xTaskCreateStatic (transmitterTaskFunction, "transmitterTask", configMINIMAL_STACK_SIZE, NULL, 3, transmitterTaskStack, &transmitterTaskTCB);
     if (transmitterTaskHandle == NULL)
       {
         return 0;
@@ -233,56 +234,50 @@ void receiverTaskFunction (){
 
           RAIL_CopyRxPacket (&rxPacket, &packet_info);
           RAIL_ReleaseRxPacket (rail_handle, packet_handle);
-          sl_sleeptimer_is_timer_running(&retransmissionSleeptimerHandle, &isRetransmissionTimerRunning);
           if(rxPacket.header.wupSeq == Wr){
               //Search for the packet if we have it and transmit it
               for(unsigned int i = 0; i < retransmissionBufferIndex; i++){
                   if(retransmissionBuffer[i].header.pktSeq == rxPacket.header.pktSeq){
-                      xQueueSend(transmitterQueueHandle, (void *)&retransmissionBuffer[i], 0);
-                      found = true;
-                  }
-                  if(found && retransmissionBuffer[i].header.pktSeq > rxPacket.header.pktSeq)
                     xQueueSend(transmitterQueueHandle, (void *)&retransmissionBuffer[i], 0);
+                    found = true;
+                  }
+                  if(found && retransmissionBuffer[i].header.pktSeq > rxPacket.header.pktSeq){
+                    xQueueSend(transmitterQueueHandle, (void *)&retransmissionBuffer[i], 0);
+                  }
               }
-          }else if(rxPacket.header.pktSeq > lastRxPktSequenceNumber + 1 && !isRetransmissionTimerRunning){
+          }else if(rxPacket.header.wupSeq == wupSeq){
+            if(rxPacket.header.pktSeq > lastRxPktSequenceNumber + 1){
               //Create a retransmission packet
               txPacket.header.wupSeq = Wr;
               txPacket.header.pktSeq = lastRxPktSequenceNumber + 1;
-              snprintf(txPacket.payload, 11, "%lu", lastRxPktSequenceNumber + 1);
-              sl_sleeptimer_start_timer_ms(&retransmissionSleeptimerHandle, RETRANSMISSION_TIMER_DELAY_MS, NULL, NULL, 1, 0);
+              snprintf((char*)txPacket.payload, 11, "%lu", lastRxPktSequenceNumber + 1);
               xQueueSend(transmitterQueueHandle, (void *)&txPacket, 0);
+            }else if(rxPacket.header.pktSeq == lastRxPktSequenceNumber + 1){
+                snprintf ((char*)buffer, 100, "Received a flood packet:\r\nPacket Sequence number: %u\r\nWUP sequence: %u\r\n", rxPacket.header.pktSeq, rxPacket.header.wupSeq);
 
-          }else if(rxPacket.header.wupSeq == wupSeq && rxPacket.header.pktSeq == lastRxPktSequenceNumber + 1){
-              if(isRetransmissionTimerRunning)
-                sl_sleeptimer_stop_timer(&retransmissionSleeptimerHandle);
+                while (ECODE_OK != UARTDRV_TransmitB (sl_uartdrv_usart_vcom_handle, &buffer[0], strlen((char*)buffer)));
 
-              snprintf (buffer, 100, "Received a flood packet:\r\nPacket Sequence number: %lu\r\nWUP sequence: %lu\r\n", rxPacket.header.pktSeq, rxPacket.header.wupSeq);
+                //Update the last packet received and WUP sequence
+                lastRxPktSequenceNumber = rxPacket.header.pktSeq;
+                if(wupSeq == Wa){
+                    wupSeq = Wb;
+                } else{
+                    wupSeq = Wa;
+                }
 
-              while (ECODE_OK != UARTDRV_TransmitB (sl_uartdrv_usart_vcom_handle, &buffer[0], strlen(buffer)));
-
-              //Update the last packet received and WUP sequence
-              lastRxPktSequenceNumber = rxPacket.header.pktSeq;
-              if(wupSeq == Wa){
-                  wupSeq = Wb;
-              } else{
-                  wupSeq = Wa;
-              }
-
-              //Insert the packet to the retransmission buffer
-              if(retransmissionBufferIndex < QUEUE_DEFAULT_LENGTH){
-                  memcpy(&retransmissionBuffer[retransmissionBufferIndex], &rxPacket, sizeof(pkt_t));
-                  retransmissionBufferIndex++;
-              }else{
-                  for(int i = 0; i<QUEUE_DEFAULT_LENGTH - 1; i++){
-                      memcpy(&retransmissionBuffer[i], &retransmissionBuffer[i+1], sizeof(pkt_t));
-                  }
-                  memcpy(&retransmissionBuffer[QUEUE_DEFAULT_LENGTH - 1], &rxPacket, sizeof(pkt_t));
-              }
-
-              //Random delay time to retransmit to avoid collision
-              sl_sleeptimer_delay_millisecond(rand() % 100);
-              xQueueSend(transmitterQueueHandle, (void *)&rxPacket, 0);
-          }
+                //Insert the packet to the retransmission buffer
+                if(retransmissionBufferIndex < QUEUE_DEFAULT_LENGTH){
+                    memcpy(&retransmissionBuffer[retransmissionBufferIndex], &rxPacket, sizeof(pkt_t));
+                    retransmissionBufferIndex++;
+                }else{
+                    for(int i = 0; i<QUEUE_DEFAULT_LENGTH - 1; i++){
+                        memcpy(&retransmissionBuffer[i], &retransmissionBuffer[i+1], sizeof(pkt_t));
+                    }
+                    memcpy(&retransmissionBuffer[QUEUE_DEFAULT_LENGTH - 1], &rxPacket, sizeof(pkt_t));
+                }
+                xQueueSend(transmitterQueueHandle, (void *)&rxPacket, 0);
+            }
+        }
       }
     }
 }
@@ -291,17 +286,15 @@ void transmitterTaskFunction(){
   while(1){
       xQueueReceive(transmitterQueueHandle, &(txPacket), portMAX_DELAY);
 
-      //Check that we don't overflow the tx buffer
-      while(RAIL_GetTxFifoSpaceAvailable(rail_handle) < sizeof(pkt_t) * 2){
-          sl_sleeptimer_delay_millisecond (100);
-      }
       //Simulate sending a WUP packet to wake up nodes on the sub GHZ frequency.
       //In our case we send the actual packet
       RAIL_WriteTxFifo (rail_handle, (uint8_t*) &txPacket, sizeof(pkt_t), false);
-      while (RAIL_StartTx (rail_handle, 21, 0, NULL) != RAIL_STATUS_NO_ERROR);
+      while (RAIL_StartTx (rail_handle, 1, 0, NULL) != RAIL_STATUS_NO_ERROR);
       //Wait for 100ms to be sure that the node have woken up
       //We are still in the rx wake up window (1sec)
       sl_sleeptimer_delay_millisecond (100);
+      //Implement a random jitter to avoid collisions
+      sl_sleeptimer_delay_millisecond (rand() % 300);
       //Send the actual flood data packet
       RAIL_WriteTxFifo (rail_handle, (uint8_t*) &txPacket, sizeof(pkt_t), false);
       while (RAIL_STATUS_NO_ERROR != RAIL_StartTx (rail_handle, 0, 0, NULL));
@@ -309,11 +302,11 @@ void transmitterTaskFunction(){
 
       //SERIAL OUTPUT FOR DEBUGGING PURPOSES
       if(txPacket.header.wupSeq == Wr)
-        snprintf (&buffer, 100, "Retransmission Packet request sent:\r\nSequence number: %lu\r\n", txPacket.header.pktSeq);
+        snprintf ((char*)buffer, 100, "Retransmission Packet request sent:\r\nSequence number: %u\r\n", txPacket.header.pktSeq);
       else
-        snprintf (&buffer, 100, "Flood packet sent:\r\nSequence number: %lu\r\nWUP sequence:%lu\r\n", txPacket.header.pktSeq, txPacket.header.wupSeq);
+        snprintf ((char*)buffer, 100, "Flood packet sent:\r\nSequence number: %u\r\nWUP sequence:%u\r\n", txPacket.header.pktSeq, txPacket.header.wupSeq);
 
-      while (ECODE_OK != UARTDRV_TransmitB (sl_uartdrv_usart_vcom_handle, &buffer[0], strlen (buffer)));
+      while (ECODE_OK != UARTDRV_TransmitB (sl_uartdrv_usart_vcom_handle, &buffer[0], strlen ((char*)buffer)));
   }
 }
 
@@ -378,12 +371,21 @@ sl_rail_util_on_event (RAIL_Handle_t rail_handle, RAIL_Events_t events)
     }
   if (events & RAIL_EVENT_RX_PACKET_RECEIVED)
     {
+      sl_led_toggle (&sl_led_led1);
+      sl_udelay_wait (10000);
+      sl_led_toggle (&sl_led_led1);
       //new rx -> deferred handler architecture
       RAIL_HoldRxPacket (rail_handle);
       xHigherPriorityTaskWoken = pdFALSE;
       vTaskNotifyGiveFromISR(receiverTaskHandle, &xHigherPriorityTaskWoken);
       portYIELD_FROM_ISR(xHigherPriorityTaskWoken);
 
+    }
+  if (events & RAIL_EVENT_TX_PACKET_SENT)
+    {
+      sl_led_toggle (&sl_led_led0);
+      sl_udelay_wait (10000);
+      sl_led_toggle (&sl_led_led0);
     }
 }
 
