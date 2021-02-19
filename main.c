@@ -46,13 +46,20 @@
 #include "sl_power_manager_config.h"
 #include "sl_led.h"
 #include "sl_simple_led_instances.h"
-
+//
+//#include "file_write_buffer.h"
+//#include "hook.h"
+//#include "sd.h"
 // -----------------------------------------------------------------------------
 //                              Macros and Typedefs
 // -----------------------------------------------------------------------------
 #define QUEUE_DEFAULT_LENGTH 16
 #define SLEEPTIMER_DELAY_MS 1000
 #define RETRANSMISSION_TIMER_DELAY_MS 500
+#define NODE_ID 1
+#define DEBUG 1
+#define STACK_SIZE (configMINIMAL_STACK_SIZE)
+
 enum wupSequence{
   Wa,
   Wb,
@@ -133,17 +140,34 @@ static uint32_t lastRxPktSequenceNumber = -1;
 static uint16_t wupSeq = Wa;
 
 ///VCOM Serial print buffer
+#if DEBUG
 static uint8_t buffer[100];
-
+#endif
+//static char sdBuffer[512] = { [0 ... 511] = '\0'};
 
 ///Retransmission buffer and index
 static pkt_t retransmissionBuffer[QUEUE_DEFAULT_LENGTH];
 static uint32_t retransmissionBufferIndex = 0;
+static uint32_t totalRetries = 0;
 static volatile bool found;
 
 static sl_sleeptimer_timer_handle_t delayerSleeptimerHandle;
 static volatile bool wait;
 static bool isTimerRunning;
+
+//static FIL* logFile;
+//static int writeRes;
+//static bool initRes;
+
+// -----------------------------------------------------------------------------
+//                                Global Variables
+// -----------------------------------------------------------------------------
+
+// -----------------------------------------------------------------------------
+//                                Static Variables
+// -----------------------------------------------------------------------------
+/// A static handle of a RAIL instance
+static RAIL_Handle_t rail_handle;
 
 // -----------------------------------------------------------------------------
 //                          Public Function Definitions
@@ -162,15 +186,16 @@ int main(void)
   // task(s) if the kernel is present.
   rail_handle = app_init();
 
+
   //Receiver Task
-    receiverTaskHandle = xTaskCreateStatic (receiverTaskFunction, "receiverTask", configMINIMAL_STACK_SIZE, NULL, 2, receiverTaskStack, &receiverTaskTCB);
+    receiverTaskHandle = xTaskCreateStatic (receiverTaskFunction, "receiverTask", STACK_SIZE, NULL, 2, receiverTaskStack, &receiverTaskTCB);
     if (receiverTaskHandle == NULL)
      {
        return(0);
      }
 
     //Transmitter Task initialization
-    transmitterTaskHandle = xTaskCreateStatic (transmitterTaskFunction, "transmitterTask", configMINIMAL_STACK_SIZE, NULL, 3, transmitterTaskStack, &transmitterTaskTCB);
+    transmitterTaskHandle = xTaskCreateStatic (transmitterTaskFunction, "transmitterTask", STACK_SIZE, NULL, 3, transmitterTaskStack, &transmitterTaskTCB);
     if (transmitterTaskHandle == NULL)
       {
         return 0;
@@ -179,7 +204,7 @@ int main(void)
     //Delayer Task
     //This task prevents going into sleep mode again after waking up. "Sleep mode" is just the Idle Task running,
     //when we wake up with RFSense we would immediately fall back into it after the callback.
-    delayerTaskHandle = xTaskCreateStatic (delayerTaskFunction, "delayerTask", configMINIMAL_STACK_SIZE, NULL, 1, delayerTaskStack, &delayerTaskTCB);
+    delayerTaskHandle = xTaskCreateStatic (delayerTaskFunction, "delayerTask", STACK_SIZE, NULL, 1, delayerTaskStack, &delayerTaskTCB);
     if (delayerTaskHandle == NULL)
      {
        return(0);
@@ -191,8 +216,10 @@ int main(void)
     // setting tx fifo
     RAIL_SetTxFifo (rail_handle, railTxFifo, 0, sizeof(pkt_t) * QUEUE_DEFAULT_LENGTH);
 
+    #if DEBUG
     //enabling vcom
     GPIO_PinOutSet (SL_BOARD_ENABLE_VCOM_PORT, SL_BOARD_ENABLE_VCOM_PIN);
+    #endif
 
 
 #if defined(SL_CATALOG_KERNEL_PRESENT)
@@ -240,23 +267,50 @@ void receiverTaskFunction (){
                   if(retransmissionBuffer[i].header.pktSeq == rxPacket.header.pktSeq){
                     xQueueSend(transmitterQueueHandle, (void *)&retransmissionBuffer[i], 0);
                     found = true;
+                    totalRetries++;
+
+                    #if DEBUG
+                    snprintf ((char*)buffer, 100, "RTXPKTTX-%d-%d\r\n", NODE_ID, rxPacket.header.pktSeq);
+
+                    while (ECODE_OK != UARTDRV_TransmitB (sl_uartdrv_usart_vcom_handle, &buffer[0], strlen((char*)buffer)));
+                    #endif
                   }
                   if(found && retransmissionBuffer[i].header.pktSeq > rxPacket.header.pktSeq){
                     xQueueSend(transmitterQueueHandle, (void *)&retransmissionBuffer[i], 0);
+                    totalRetries++;
+
+                    #if DEBUG
+                    snprintf ((char*)buffer, 100, "RTXPKTTX-%d-%d\r\n", NODE_ID, rxPacket.header.pktSeq);
+
+                    while (ECODE_OK != UARTDRV_TransmitB (sl_uartdrv_usart_vcom_handle, &buffer[0], strlen((char*)buffer)));
+                    #endif
                   }
               }
+              #if DEBUG
+              snprintf ((char*)buffer, 100, "RTXTOT-%d-%d\r\n", NODE_ID, totalRetries);
+
+              while (ECODE_OK != UARTDRV_TransmitB (sl_uartdrv_usart_vcom_handle, &buffer[0], strlen((char*)buffer)));
+              #endif
+
           }else if(rxPacket.header.wupSeq == wupSeq){
             if(rxPacket.header.pktSeq > lastRxPktSequenceNumber + 1){
               //Create a retransmission packet
               txPacket.header.wupSeq = Wr;
               txPacket.header.pktSeq = lastRxPktSequenceNumber + 1;
-              snprintf((char*)txPacket.payload, 11, "%lu", lastRxPktSequenceNumber + 1);
+
+              #if DEBUG
+              snprintf ((char*)buffer, 100, "RTXREQ-%d-%d\r\n", NODE_ID, txPacket.header.pktSeq);
+
+              while (ECODE_OK != UARTDRV_TransmitB (sl_uartdrv_usart_vcom_handle, &buffer[0], strlen((char*)buffer)));
+              #endif
+
               xQueueSend(transmitterQueueHandle, (void *)&txPacket, 0);
             }else if(rxPacket.header.pktSeq == lastRxPktSequenceNumber + 1){
-                snprintf ((char*)buffer, 100, "Received a flood packet:\r\nPacket Sequence number: %u\r\nWUP sequence: %u\r\n", rxPacket.header.pktSeq, rxPacket.header.wupSeq);
+                #if DEBUG
+                snprintf ((char*)buffer, 100, "RXPKT-%d-%d\r\n", NODE_ID, rxPacket.header.pktSeq);
 
                 while (ECODE_OK != UARTDRV_TransmitB (sl_uartdrv_usart_vcom_handle, &buffer[0], strlen((char*)buffer)));
-
+                #endif
                 //Update the last packet received and WUP sequence
                 lastRxPktSequenceNumber = rxPacket.header.pktSeq;
                 if(wupSeq == Wa){
@@ -299,14 +353,12 @@ void transmitterTaskFunction(){
       RAIL_WriteTxFifo (rail_handle, (uint8_t*) &txPacket, sizeof(pkt_t), false);
       while (RAIL_STATUS_NO_ERROR != RAIL_StartTx (rail_handle, 0, 0, NULL));
 
-
+      #if DEBUG
       //SERIAL OUTPUT FOR DEBUGGING PURPOSES
-      if(txPacket.header.wupSeq == Wr)
-        snprintf ((char*)buffer, 100, "Retransmission Packet request sent:\r\nSequence number: %u\r\n", txPacket.header.pktSeq);
-      else
-        snprintf ((char*)buffer, 100, "Flood packet sent:\r\nSequence number: %u\r\nWUP sequence:%u\r\n", txPacket.header.pktSeq, txPacket.header.wupSeq);
+      snprintf ((char*)buffer, 100, "TXPKT-%d-%d\r\n", NODE_ID, txPacket.header.pktSeq);
 
       while (ECODE_OK != UARTDRV_TransmitB (sl_uartdrv_usart_vcom_handle, &buffer[0], strlen ((char*)buffer)));
+      #endif
   }
 }
 
@@ -343,6 +395,7 @@ void vApplicationIdleHook ()
   // Starting RFSENSE before going to sleep
   RAIL_Idle (rail_handle, RAIL_IDLE, true);
   RAIL_StartRfSense (rail_handle, RAIL_RFSENSE_SUBGHZ_LOW_SENSITIVITY, 50, rfSenseCb);
+//  executeCallbacks();
 }
 
 ///RFSense Callback function
