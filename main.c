@@ -46,17 +46,13 @@
 #include "sl_power_manager_config.h"
 #include "sl_led.h"
 #include "sl_simple_led_instances.h"
-//
-//#include "file_write_buffer.h"
-//#include "hook.h"
-//#include "sd.h"
 // -----------------------------------------------------------------------------
 //                              Macros and Typedefs
 // -----------------------------------------------------------------------------
 #define QUEUE_DEFAULT_LENGTH 16
 #define SLEEPTIMER_DELAY_MS 1000
 #define RETRANSMISSION_TIMER_DELAY_MS 500
-#define NODE_ID 1
+#define NODE_ID 5
 #define DEBUG 1
 #define STACK_SIZE (configMINIMAL_STACK_SIZE)
 
@@ -71,12 +67,14 @@ typedef struct
 {
   uint16_t wupSeq; //Wa, Wb, Wr
   uint16_t pktSeq; //Packet Sequence #
+  uint16_t hopCount;
+  uint16_t ms;
 } pkt_header_t;
 
 typedef struct
 {
   pkt_header_t header;
-  uint8_t payload[12];
+  uint8_t payload[8];
 } pkt_t;
 #pragma pack(pop)
 // -----------------------------------------------------------------------------
@@ -143,7 +141,6 @@ static uint16_t wupSeq = Wa;
 #if DEBUG
 static uint8_t buffer[100];
 #endif
-//static char sdBuffer[512] = { [0 ... 511] = '\0'};
 
 ///Retransmission buffer and index
 static pkt_t retransmissionBuffer[QUEUE_DEFAULT_LENGTH];
@@ -155,10 +152,10 @@ static sl_sleeptimer_timer_handle_t delayerSleeptimerHandle;
 static volatile bool wait;
 static bool isTimerRunning;
 
-//static FIL* logFile;
-//static int writeRes;
-//static bool initRes;
-
+///Packet time
+static uint32_t remainingTimeTicks = 0;
+static volatile uint32_t remainingTimeMs = 0;
+static sl_sleeptimer_timer_handle_t timeSleeptimerHandle;
 // -----------------------------------------------------------------------------
 //                                Global Variables
 // -----------------------------------------------------------------------------
@@ -259,35 +256,37 @@ void receiverTaskFunction (){
               sl_sleeptimer_restart_timer_ms(&delayerSleeptimerHandle, SLEEPTIMER_DELAY_MS, timerCallback, (void*)&wait, 0, 0);
           }
 
-          RAIL_CopyRxPacket (&rxPacket, &packet_info);
+          RAIL_CopyRxPacket ((uint8_t*)&rxPacket, &packet_info);
           RAIL_ReleaseRxPacket (rail_handle, packet_handle);
           if(rxPacket.header.wupSeq == Wr){
               //Search for the packet if we have it and transmit it
               for(unsigned int i = 0; i < retransmissionBufferIndex; i++){
                   if(retransmissionBuffer[i].header.pktSeq == rxPacket.header.pktSeq){
+                    sl_sleeptimer_restart_timer_ms(&timeSleeptimerHandle, 2000, NULL, NULL, 0, 0);
                     xQueueSend(transmitterQueueHandle, (void *)&retransmissionBuffer[i], 0);
                     found = true;
                     totalRetries++;
 
                     #if DEBUG
-                    snprintf ((char*)buffer, 100, "RTXPKTTX-%d-%d\r\n", NODE_ID, rxPacket.header.pktSeq);
+                    snprintf ((char*)buffer, 100, "RTXPKTTX-%d-%d-%ld\r\n", NODE_ID, retransmissionBuffer[i].header.pktSeq, retransmissionBuffer[i].header.ms + remainingTimeMs);
 
                     while (ECODE_OK != UARTDRV_TransmitB (sl_uartdrv_usart_vcom_handle, &buffer[0], strlen((char*)buffer)));
                     #endif
                   }
                   if(found && retransmissionBuffer[i].header.pktSeq > rxPacket.header.pktSeq){
+                    sl_sleeptimer_restart_timer_ms(&timeSleeptimerHandle, 2000, NULL, NULL, 0, 0);
                     xQueueSend(transmitterQueueHandle, (void *)&retransmissionBuffer[i], 0);
                     totalRetries++;
 
                     #if DEBUG
-                    snprintf ((char*)buffer, 100, "RTXPKTTX-%d-%d\r\n", NODE_ID, rxPacket.header.pktSeq);
+                    snprintf ((char*)buffer, 100, "RTXPKTTX-%d-%d-%ld\r\n", NODE_ID, retransmissionBuffer[i].header.pktSeq, retransmissionBuffer[i].header.ms + remainingTimeMs);
 
                     while (ECODE_OK != UARTDRV_TransmitB (sl_uartdrv_usart_vcom_handle, &buffer[0], strlen((char*)buffer)));
                     #endif
                   }
               }
               #if DEBUG
-              snprintf ((char*)buffer, 100, "RTXTOT-%d-%d\r\n", NODE_ID, totalRetries);
+              snprintf ((char*)buffer, 100, "RTXTOT-%d-%ld\r\n", NODE_ID, totalRetries);
 
               while (ECODE_OK != UARTDRV_TransmitB (sl_uartdrv_usart_vcom_handle, &buffer[0], strlen((char*)buffer)));
               #endif
@@ -306,30 +305,41 @@ void receiverTaskFunction (){
 
               xQueueSend(transmitterQueueHandle, (void *)&txPacket, 0);
             }else if(rxPacket.header.pktSeq == lastRxPktSequenceNumber + 1){
-                #if DEBUG
-                snprintf ((char*)buffer, 100, "RXPKT-%d-%d\r\n", NODE_ID, rxPacket.header.pktSeq);
+              sl_sleeptimer_restart_timer_ms(&timeSleeptimerHandle, 2000, NULL, NULL, 0, 0);
+              #if DEBUG
+              snprintf ((char*)buffer, 100, "RXPKT-%d-%d-%d-%d\r\n", NODE_ID, rxPacket.header.pktSeq, rxPacket.header.hopCount, rxPacket.header.ms);
 
-                while (ECODE_OK != UARTDRV_TransmitB (sl_uartdrv_usart_vcom_handle, &buffer[0], strlen((char*)buffer)));
-                #endif
-                //Update the last packet received and WUP sequence
-                lastRxPktSequenceNumber = rxPacket.header.pktSeq;
-                if(wupSeq == Wa){
-                    wupSeq = Wb;
-                } else{
-                    wupSeq = Wa;
-                }
+              while (ECODE_OK != UARTDRV_TransmitB (sl_uartdrv_usart_vcom_handle, &buffer[0], strlen((char*)buffer)));
+              #endif
+              //Update the last packet received and WUP sequence
+              lastRxPktSequenceNumber = rxPacket.header.pktSeq;
+              if(wupSeq == Wa){
+                  wupSeq = Wb;
+              } else{
+                  wupSeq = Wa;
+              }
 
-                //Insert the packet to the retransmission buffer
-                if(retransmissionBufferIndex < QUEUE_DEFAULT_LENGTH){
-                    memcpy(&retransmissionBuffer[retransmissionBufferIndex], &rxPacket, sizeof(pkt_t));
-                    retransmissionBufferIndex++;
-                }else{
-                    for(int i = 0; i<QUEUE_DEFAULT_LENGTH - 1; i++){
-                        memcpy(&retransmissionBuffer[i], &retransmissionBuffer[i+1], sizeof(pkt_t));
-                    }
-                    memcpy(&retransmissionBuffer[QUEUE_DEFAULT_LENGTH - 1], &rxPacket, sizeof(pkt_t));
-                }
-                xQueueSend(transmitterQueueHandle, (void *)&rxPacket, 0);
+              //Update the hopCount
+              rxPacket.header.hopCount = rxPacket.header.hopCount + 1;
+
+              //Insert the packet to the retransmission buffer
+              if(retransmissionBufferIndex < QUEUE_DEFAULT_LENGTH){
+                  memcpy(&retransmissionBuffer[retransmissionBufferIndex], &rxPacket, sizeof(pkt_t));
+                  retransmissionBufferIndex++;
+              }else{
+                  for(int i = 0; i<QUEUE_DEFAULT_LENGTH - 1; i++){
+                      memcpy(&retransmissionBuffer[i], &retransmissionBuffer[i+1], sizeof(pkt_t));
+                  }
+                  memcpy(&retransmissionBuffer[QUEUE_DEFAULT_LENGTH - 1], &rxPacket, sizeof(pkt_t));
+              }
+              xQueueSend(transmitterQueueHandle, (void *)&rxPacket, 0);
+
+              #if DEBUG
+              //SERIAL OUTPUT FOR DEBUGGING PURPOSES
+              snprintf ((char*)buffer, 100, "TXPKT-%d-%d-%d-%ld\r\n", NODE_ID, rxPacket.header.pktSeq, rxPacket.header.hopCount, rxPacket.header.ms + remainingTimeMs);
+
+              while (ECODE_OK != UARTDRV_TransmitB (sl_uartdrv_usart_vcom_handle, &buffer[0], strlen ((char*)buffer)));
+              #endif
             }
         }
       }
@@ -349,16 +359,16 @@ void transmitterTaskFunction(){
       sl_sleeptimer_delay_millisecond (100);
       //Implement a random jitter to avoid collisions
       sl_sleeptimer_delay_millisecond (rand() % 300);
+
+      //Record the time the packet was in the node in the header
+      sl_sleeptimer_get_timer_time_remaining(&timeSleeptimerHandle, &remainingTimeTicks);
+      remainingTimeMs = sl_sleeptimer_tick_to_ms(remainingTimeTicks);
+      remainingTimeMs = 1900 - remainingTimeMs;
+      txPacket.header.ms = txPacket.header.ms + remainingTimeMs;
+
       //Send the actual flood data packet
       RAIL_WriteTxFifo (rail_handle, (uint8_t*) &txPacket, sizeof(pkt_t), false);
       while (RAIL_STATUS_NO_ERROR != RAIL_StartTx (rail_handle, 0, 0, NULL));
-
-      #if DEBUG
-      //SERIAL OUTPUT FOR DEBUGGING PURPOSES
-      snprintf ((char*)buffer, 100, "TXPKT-%d-%d\r\n", NODE_ID, txPacket.header.pktSeq);
-
-      while (ECODE_OK != UARTDRV_TransmitB (sl_uartdrv_usart_vcom_handle, &buffer[0], strlen ((char*)buffer)));
-      #endif
   }
 }
 
@@ -376,13 +386,11 @@ void delayerTaskFunction ()
           sl_sleeptimer_start_timer_ms(&delayerSleeptimerHandle, SLEEPTIMER_DELAY_MS, timerCallback, (void*)&wait, 0, 0);
           while(wait);
       }
-      //TODO: remove after finishing the debugging phase
-      if(true)
-        __asm__("nop");
     }
 }
 
 void timerCallback(sl_sleeptimer_timer_handle_t *handle, void *data){
+  (void)handle; //unused parameter
   volatile bool *wait_flag = (bool*)data;
 
   *wait_flag = false;
@@ -395,7 +403,6 @@ void vApplicationIdleHook ()
   // Starting RFSENSE before going to sleep
   RAIL_Idle (rail_handle, RAIL_IDLE, true);
   RAIL_StartRfSense (rail_handle, RAIL_RFSENSE_SUBGHZ_LOW_SENSITIVITY, 50, rfSenseCb);
-//  executeCallbacks();
 }
 
 ///RFSense Callback function

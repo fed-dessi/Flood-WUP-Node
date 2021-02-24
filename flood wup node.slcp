@@ -66,12 +66,12 @@ configuration:
 description: The RAIL Empty project is a barebone RAIL app that can be a basis of
   a proprietary solutions. This comes prepared with a Single PHY radio configurator
   and a basic callback function for RAIL.
-label: node_test
+label: flood wup node
 source:
 - {path: main.c}
 - {path: app_init.c}
 - {path: app_process.c}
-project_name: node_test
+project_name: flood_wup_node
 quality: production
 component:
 - {id: EFR32MG12P433F1024GM68}
